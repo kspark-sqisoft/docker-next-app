@@ -58,6 +58,7 @@ DATABASE_URL="postgresql://..." npm run db:seed
 
 - [docs/STUDY-GUIDE.md](./docs/STUDY-GUIDE.md) — docker-app과의 대응, 디렉터리 구조, 단계별 학습 절차  
   - **ORM**: 이 브랜치는 Drizzle 기준(`drizzle/`, `lib/db.ts`). 가이드 본문의 Prisma 절은 `main` 브랜치와의 대조용으로 남겨 두었습니다.  
+  - **Prisma vs Drizzle** 개념·파일 대응표는 가이드 **§1.3**, **tRPC** 도입 시 이점·핵심 스니펫은 **§1.4** 참고.  
   - **추가 학습 로드맵**: 액션·페이지네이션·테스트·CI 등 제안은 가이드 **§10**
 
 ## 주요 스크립트

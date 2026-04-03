@@ -3,6 +3,6 @@ set -e
 cd /app
 ROOT="${UPLOADS_DIR:-/app/uploads}"
 mkdir -p "$ROOT/posts" "$ROOT/profiles"
-# 런타임에 DB가 준비된 뒤 마이그레이션 적용 (프로덕션 스타일)
-npx drizzle-kit migrate
+# 런타임에 DB가 준비된 뒤 마이그레이션 적용 (npx 는 별도 drizzle-kit 이라 orm 버전 불일치 날 수 있음)
+npm run db:deploy
 exec node server.js

@@ -23,7 +23,7 @@
 | docker-app | docker-next-app (이 저장소) |
 |------------|----------------------------|
 | PostgreSQL + Compose로 DB | 동일. 호스트 포트는 **5433**으로 분리해 다른 Postgres와 충돌을 줄임 |
-| `User`(이메일·비밀번호 해시·이름), `Post`(제목·본문·작성자) | Prisma로 동일 도메인 + `User.profileImageUrl`, `Post.imageUrls`(JSON) |
+| `User`(이메일·비밀번호 해시·이름), `Post`(제목·본문·작성자) | `main`: Prisma / `drizzle`: Drizzle — 동일 도메인 + `User.profileImageUrl`, `Post.imageUrls`(JSON) |
 | JWT/세션 기반 로그인 후 글 CRUD | NextAuth + JWT 세션, Route Handler로 REST 형태 API (`/api/posts` 등) |
 | `POST /posts/images`, 프로필 PATCH·아바타 | `POST /api/posts/images`, `PATCH /api/profile`, `POST /api/profile/avatar` (쿠키 세션) |
 | 정적 `/uploads` | `app/uploads/[[...path]]/route.ts` GET + 디스크 `UPLOADS_DIR` (docker-app 의 express.static 과 동일 역할) |
@@ -32,9 +32,246 @@
 ### 1.2 다른 점
 
 - **한 코드베이스**: API가 Route Handler, 화면은 RSC/클라이언트 컴포넌트로 같은 Next 앱 안에 있음.
-- **ORM**: TypeORM 엔티티 대신 **Prisma 스키마** + 마이그레이션.
+- **ORM**: TypeORM 엔티티 대신 **`main`은 Prisma 스키마**, **`drizzle` 브랜치는 Drizzle**(`drizzle/schema.ts`) + 각각의 마이그레이션 도구.
 - **Prisma 7**: PostgreSQL 연결에 **`@prisma/adapter-pg` + `pg` Pool**이 필요합니다. 생성된 클라이언트는 `app/generated/prisma`에 있으며, `lib/prisma.ts`에서 어댑터를 붙입니다.
 - **Edge 미들웨어**: `middleware.ts`는 Edge에서 실행되므로 **Prisma를 직접 import 할 수 없습니다**. 그래서 `auth.config.ts`(DB 없음)와 `auth.ts`(실제 `authorize`에서 Prisma 사용)로 나눴습니다.
+
+### 1.3 Prisma와 Drizzle 비교 (개념·이 저장소)
+
+같은 PostgreSQL·같은 테이블이라도 **도구가 바뀌면 생각하는 단위**가 달라집니다. `main`은 Prisma, **`drizzle` 브랜치**는 Drizzle 기준입니다.
+
+| 구분 | **Prisma** | **Drizzle ORM** |
+|------|------------|-----------------|
+| **스키마 표현** | `schema.prisma` 전용 DSL (`model`, `@@map`, `@map`) | TypeScript (`pgTable`, `varchar`, `relations` 등) — 스키마가 **그냥 코드** |
+| **클라이언트** | `prisma generate`로 **전용 클라이언트·타입 생성** (`app/generated/prisma`) | 별도 “클라이언트 생성” 없음. `drizzle-orm` + 스키마 타입으로 **추론** |
+| **DB 연결** | Prisma 7: `@prisma/adapter-pg` + `pg` `Pool` → `PrismaClient` | `drizzle-orm/node-postgres` + 같은 `pg` `Pool` → `drizzle(pool, { schema })` |
+| **쿼리 스타일** | `prisma.post.findMany({ where, include, orderBy })` — **고수준 API** | `db.query.posts.findMany({ with: { author: true } })` **또는** `db.select().from(posts).where(...)` — **SQL에 가까운 선택** 가능 |
+| **마이그레이션** | `prisma migrate dev` / `migrate deploy` — 스키마 diff → SQL | `drizzle-kit generate`로 SQL 생성, `drizzle-kit migrate`로 적용. 로컬 실험에 `drizzle-kit push`도 있음 |
+| **시드·스크립트** | `prisma db seed` 등, 보통 `PrismaClient` 직접 사용 | `tsx drizzle/seed.ts` + 공유 `lib/db.ts`의 `db` 사용 |
+| **번들·의존성** | 생성 클라이언트 + 런타임이 **상대적으로 큼** | **가벼운 편**. 다만 스키마 로드 시 `drizzle-kit`이 `drizzle-orm`을 끌어다 씀(마이그레이션 시) |
+| **학습 곡선** | 스키마·마이그레이션·generate 흐름이 **한 제품 안에 정리**됨 | SQL·Postgres 타입에 익숙할수록 **유리**. 직접 SQL/멱등 DDL을 쓰는 경우가 많아짐 |
+
+**이 저장소에서 파일이 바뀌는 대응**
+
+| 역할 | Prisma (`main`) | Drizzle (`drizzle` 브랜치) |
+|------|-----------------|---------------------------|
+| 스키마 | `prisma/schema.prisma` | `drizzle/schema.ts` |
+| DB 싱글톤 | `lib/prisma.ts` | `lib/db.ts` (`pool` + `db`) |
+| 마이그레이션 SQL | `prisma/migrations/` | `drizzle/migrations/` |
+| CLI 설정 | `prisma.config.ts` | `drizzle.config.ts` |
+| 시드 | `prisma/seed.ts` | `drizzle/seed.ts` |
+| 빌드 | `postinstall` / 빌드 전 `prisma generate`가 필요했음 | **generate 단계 없음** (`drizzle-orm`만 설치) |
+
+**택할 때 짧은 기준 (실무 감각용)**
+
+- **Prisma**: 팀이 스키마 중심·생성 API·마이그레이션 일원화를 선호할 때. 온보딩·CRUD 위주 서비스에 잘 맞음.
+- **Drizzle**: SQL·성능·번들을 더 세게 잡고 싶거나, 스키마를 TS로만 관리하고 싶을 때. **다른 ORM에서 옮길 때** 기존 DB와 맞추려면 멱등 마이그레이션·베이스라인 설계를 스스로 정리해야 하는 경우가 많음(이 repo `drizzle` 브랜치는 Prisma DB와 공존하도록 `0000_initial.sql`을 `IF NOT EXISTS` 등으로 조정한 예).
+
+### 1.4 tRPC를 더하면 (타입·호출 계층)
+
+**tRPC**는 “같은 TypeScript 모노레포 안”에서 **프로시저 호출**처럼 서버 함수를 부르고, **입력·출력 타입을 끝까지 추론**하게 해 주는 레이어입니다. 이 저장소는 기본적으로 **REST Route Handler + TanStack Query `fetch`** 와 **Server Action**을 씁니다. 여기에 tRPC를 **추가·일부 대체**하면 보통 아래가 좋아집니다.
+
+| 효과 | 설명 |
+|------|------|
+| **엔드투엔드 타입** | `PostJson` 등을 클라이언트에 수동으로 맞출 필요가 줄고, 라우터 `query`/`mutation`의 **반환 타입이 그대로** `useQuery` 등에 붙습니다. |
+| **호출 형태** | `fetch("/api/posts?cursor=…")` 대신 `trpc.posts.list.useInfiniteQuery(…)` 처럼 **함수·프로시저 단위**로 통일하기 쉽습니다. |
+| **입력 검증** | Zod를 `procedure.input(...)`에 붙이면 **프로시저 계약**이 한곳에 모입니다. (지금도 API·액션에 Zod가 있으므로, **중복을 줄이려면** 라우터로 옮기는 식으로 정리) |
+
+**그대로 두는 편이 나은 것**
+
+- **외부 클라이언트·모바일·웹훅**이 HTTP JSON 계약을 써야 하면 **REST Route Handler**를 유지하는 경우가 많습니다. tRPC는 보통 **앱 내부**용에 더 잘 맞습니다.
+- **폼 + `useActionState`** 로 이미 단순한 Server Action은 굳이 tRPC로 옮기지 않아도 됩니다. (옮겨도 되지만 학습 표면만 넓어질 수 있음.)
+
+**도입 시 자주 두는 경로 (예시)**
+
+```
+server/
+  trpc.ts              # initTRPC, procedure, (protectedProcedure)
+  context.ts           # createContext — auth(), db 등
+  routers/
+    _app.ts            # appRouter = merge(postsRouter, …)
+    posts.ts           # posts.list, posts.byId, …
+app/api/trpc/[trpc]/route.ts   # fetchRequestHandler — 단일 엔드포인트
+lib/trpc/
+  react.tsx            # createTRPCReact<AppRouter>()
+  client.ts            # httpBatchLink + base URL (클라이언트 전용)
+```
+
+아래 스니펫은 **실제 패키지를 설치했을 때**의 핵심 골격입니다. (`@trpc/server`, `@trpc/client`, `@trpc/react-query`, 프로젝트에 맞는 `@tanstack/react-query` 버전. JSON에 `Date` 등을 실어내려면 **`superjson`** transformer를 서버·클라이언트 **양쪽**에 맞추는 방식이 흔합니다.)
+
+#### 스니펫 — Context · t 인스턴스
+
+```typescript
+// server/context.ts
+import { auth } from "@/auth";
+
+export async function createContext() {
+  const session = await auth();
+  return { session };
+}
+
+export type Context = Awaited<ReturnType<typeof createContext>>;
+```
+
+```typescript
+// server/trpc.ts
+import { initTRPC, TRPCError } from "@trpc/server";
+import type { Context } from "./context";
+
+const t = initTRPC.context<Context>().create();
+
+export const router = t.router;
+export const publicProcedure = t.procedure;
+
+/** 로그인 필수 프로시저 예시 */
+export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+  const userId = ctx.session?.user?.id;
+  if (!userId) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+  return next({ ctx: { ...ctx, userId } });
+});
+```
+
+#### 스니펫 — 라우터 (지금의 GET /api/posts 와 같은 역할을 옮길 때)
+
+```typescript
+// server/routers/posts.ts
+import { z } from "zod";
+import { router, publicProcedure } from "../trpc";
+// import { db } from "@/lib/db";  // drizzle 브랜치
+// import { prisma } from "@/lib/prisma";  // main
+
+export const postsRouter = router({
+  list: publicProcedure
+    .input(
+      z.object({
+        cursor: z.string().uuid().optional(),
+        limit: z.number().min(1).max(50).default(15),
+      }),
+    )
+    .query(async ({ input }) => {
+      // 여기서 기존 app/api/posts/route.ts GET 과 동일한 DB 조회
+      // return { items: PostJson[], nextCursor: string | null };
+      return { items: [], nextCursor: null as string | null };
+    }),
+});
+```
+
+```typescript
+// server/routers/_app.ts
+import { router } from "../trpc";
+import { postsRouter } from "./posts";
+
+export const appRouter = router({
+  posts: postsRouter,
+});
+
+export type AppRouter = typeof appRouter;
+```
+
+#### 스니펫 — App Router용 HTTP 어댑터
+
+```typescript
+// app/api/trpc/[trpc]/route.ts
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { appRouter } from "@/server/routers/_app";
+import { createContext } from "@/server/context";
+
+function handler(req: Request) {
+  return fetchRequestHandler({
+    endpoint: "/api/trpc",
+    router: appRouter,
+    req,
+    createContext,
+  });
+}
+
+export { handler as GET, handler as POST };
+```
+
+#### 스니펫 — React Query와 연결 (클라이언트)
+
+```typescript
+// lib/trpc/react.tsx
+"use client";
+
+import { createTRPCReact } from "@trpc/react-query";
+import type { AppRouter } from "@/server/routers/_app";
+
+export const trpc = createTRPCReact<AppRouter>();
+```
+
+```typescript
+// lib/trpc/client.ts — Provider 에 넘길 trpcClient 생성 (요지)
+"use client";
+
+import { httpBatchLink } from "@trpc/client";
+import superjson from "superjson";
+import { trpc } from "./react";
+import type { AppRouter } from "@/server/routers/_app";
+
+function getBaseUrl() {
+  if (typeof window !== "undefined") return "";
+  return `http://localhost:${process.env.PORT ?? 3000}`;
+}
+
+export function createTrpcClient() {
+  return trpc.createClient({
+    links: [
+      httpBatchLink({
+        url: `${getBaseUrl()}/api/trpc`,
+      }),
+    ],
+    transformer: superjson,
+  });
+}
+```
+
+```tsx
+// components/providers.tsx 에 추가하는 형태(요지)
+"use client";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
+import { trpc } from "@/lib/trpc/react";
+import { createTrpcClient } from "@/lib/trpc/client";
+
+export function TrpcProvider({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient());
+  const [trpcClient] = useState(() => createTrpcClient());
+
+  return (
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </trpc.Provider>
+  );
+}
+```
+
+#### 스니펫 — 목록 컴포넌트에서 (지금 post-list.tsx 의 fetch 대체 예)
+
+```tsx
+// components/posts/post-list.tsx 를 tRPC 기준으로 바꿀 때의 호출 예 (TanStack Query v5 + tRPC)
+"use client";
+
+import { trpc } from "@/lib/trpc/react";
+
+export function PostListTrpcExample() {
+  const q = trpc.posts.list.useInfiniteQuery(
+    { limit: 6 },
+    {
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (last) => last.nextCursor ?? undefined,
+    },
+  );
+
+  // q.data?.pages.flatMap((p) => p.items) …
+  return null;
+}
+```
+
+**정리**: tRPC는 **내부 API의 타입·호출 형태**를 정리하는 데 강하고, **공개 REST·폼 Server Action**과 **병행**하는 구성이 이 저장소 같은 학습용·실무 하이브리드에 잘 맞습니다.
 
 ---
 
