@@ -1,7 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// docker-app(study-board) User/Post + 프로필 이미지·게시글 첨부 이미지
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +7,46 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+model User {
+  id              String     @id @default(uuid())
+  email           String     @unique @db.VarChar(320)
+  passwordHash    String     @map("password_hash")
+  name            String     @db.VarChar(100)
+  profileImageUrl String?    @map("profile_image_url") @db.VarChar(512)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  posts           Post[]
+  postLikes       PostLike[]
+
+  @@map("users")
+}
+
+model Post {
+  id        String     @id @default(uuid())
+  title     String     @db.VarChar(200)
+  content   String     @db.Text
+  /// `/uploads/posts/…` 경로 문자열 배열 (jsonb)
+  imageUrls Json       @default("[]") @map("image_urls")
+  authorId  String?    @map("author_id")
+  author    User?      @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  likes     PostLike[]
+
+  @@map("posts")
+}
+
+/// 로그인 사용자당 글 하나에 한 번만 좋아요 (토글 API)
+model PostLike {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  postId    String   @map("post_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, postId])
+  @@map("post_likes")
 }

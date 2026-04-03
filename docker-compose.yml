@@ -1,0 +1,45 @@
+# 운영 스타일: Postgres + Next 멀티스테이지 이미지 (핫 리로드 없음)
+# 사용: docker compose up -d --build
+# 호스트 DB 포트는 docker-app 과 겹치지 않게 5433 → 컨테이너 5432
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: docker-next-blog-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-blog}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-blog}
+      POSTGRES_DB: ${DB_NAME:-blog}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: .
+    container_name: docker-next-blog-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USERNAME:-blog}:${DB_PASSWORD:-blog}@db:5432/${DB_NAME:-blog}
+      AUTH_SECRET: ${AUTH_SECRET:-change_me_to_a_long_random_secret_at_least_32_chars}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  uploads_data:

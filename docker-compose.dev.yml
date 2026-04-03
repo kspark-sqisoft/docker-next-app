@@ -1,0 +1,51 @@
+# 개발: 소스 볼륨 + next dev (핫 리로드). 프로젝트 이름 분리로 볼륨·컨테이너가 운영 스택과 겹치지 않음
+# 사용: docker compose -f docker-compose.dev.yml up
+# --build 는 Dockerfile.dev·엔트리포인트 변경 후
+
+name: docker-next-blog-dev
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: docker-next-blog-db-dev
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-blog}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-blog}
+      POSTGRES_DB: ${DB_NAME:-blog}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: docker-next-blog-web-dev
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${DB_USERNAME:-blog}:${DB_PASSWORD:-blog}@db:5432/${DB_NAME:-blog}
+      AUTH_SECRET: ${AUTH_SECRET:-change_me_to_a_long_random_secret_at_least_32_chars}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      UPLOADS_DIR: /app/uploads
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - .:/app
+      - web_node_modules:/app/node_modules
+      - uploads_data_dev:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data_dev:
+  web_node_modules:
+  uploads_data_dev:
