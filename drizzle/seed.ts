@@ -1,13 +1,8 @@
 import "dotenv/config";
 import { hash } from "bcryptjs";
-import { Pool } from "pg";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../app/generated/prisma/client";
-import { serverEnv } from "../lib/env/server";
-
-const pool = new Pool({ connectionString: serverEnv.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { eq } from "drizzle-orm";
+import { posts, users } from "./schema";
+import { db, pool } from "../lib/db";
 
 /** 시드 전용: 재실행 시 같은 id 를 upsert 하므로 글이 30개로 유지·갱신됩니다. */
 const SEED_RANDOM_POST_IDS = [
@@ -45,7 +40,7 @@ const SEED_RANDOM_POST_IDS = [
 
 const TOPICS = [
   "Next.js App Router",
-  "Prisma migrate",
+  "Drizzle ORM",
   "Docker Compose",
   "Server Action",
   "TanStack Query",
@@ -87,7 +82,7 @@ function buildRandomPost(index: number): { title: string; content: string } {
     `${pick(SNIPPETS)}`,
     `태그 느낌: ${topic} / ${mood}`,
     "",
-    "(prisma/seed.ts 가 만든 학습용 더미 글입니다.)",
+    "(drizzle/seed.ts 가 만든 학습용 더미 글입니다.)",
   ];
   return { title: title.slice(0, 200), content: lines.join("\n") };
 }
@@ -113,7 +108,6 @@ function printConnectionHelp(): void {
     컨테이너에 붙는 주소와 달라야 합니다.
     docker-compose.dev.yml 기준 예시:
     DATABASE_URL="postgresql://blog:blog@localhost:5433/blog"
-    (호스트에서는 localhost + 퍼블리시 포트 5433, 호스트명 db 는 컨테이너 네트워크 안에서만 동작합니다.)
   • 이미 web 컨테이너를 쓰는 경우 시드를 컨테이너 안에서 실행할 수도 있습니다:
     docker compose -f docker-compose.dev.yml exec web npm run db:seed
 `);
@@ -124,54 +118,65 @@ async function main() {
   const password = "demo12345";
   const passwordHash = await hash(password, 12);
 
-  await prisma.user.upsert({
-    where: { email },
-    create: {
+  await db
+    .insert(users)
+    .values({
+      id: crypto.randomUUID(),
       email,
       name: "Demo User",
       passwordHash,
-    },
-    update: { passwordHash, name: "Demo User" },
+    })
+    .onConflictDoUpdate({
+      target: users.email,
+      set: { passwordHash, name: "Demo User" },
+    });
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.email, email),
   });
+  if (!user) throw new Error("seed: demo user missing after upsert");
 
-  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  const welcomeContent =
+    "이 글은 drizzle/seed.ts 로 시드되었습니다.\n\n로그인: demo@example.com / demo12345";
 
-  await prisma.post.upsert({
-    where: { id: "00000000-0000-4000-8000-000000000001" },
-    create: {
+  await db
+    .insert(posts)
+    .values({
       id: "00000000-0000-4000-8000-000000000001",
       title: "Welcome to Docker Next Blog",
-      content:
-        "이 글은 prisma/seed.ts 로 시드되었습니다.\n\n로그인: demo@example.com / demo12345",
+      content: welcomeContent,
       authorId: user.id,
       imageUrls: [],
-    },
-    update: {
-      title: "Welcome to Docker Next Blog",
-      content:
-        "이 글은 prisma/seed.ts 로 시드되었습니다.\n\n로그인: demo@example.com / demo12345",
-      authorId: user.id,
-    },
-  });
+    })
+    .onConflictDoUpdate({
+      target: posts.id,
+      set: {
+        title: "Welcome to Docker Next Blog",
+        content: welcomeContent,
+        authorId: user.id,
+      },
+    });
 
   for (let i = 0; i < SEED_RANDOM_POST_IDS.length; i++) {
     const id = SEED_RANDOM_POST_IDS[i]!;
     const { title, content } = buildRandomPost(i);
-    await prisma.post.upsert({
-      where: { id },
-      create: {
+    await db
+      .insert(posts)
+      .values({
         id,
         title,
         content,
         authorId: user.id,
         imageUrls: [],
-      },
-      update: {
-        title,
-        content,
-        authorId: user.id,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: posts.id,
+        set: {
+          title,
+          content,
+          authorId: user.id,
+        },
+      });
   }
 
   console.log("Seeded demo user:", email, "/", password);
@@ -183,14 +188,12 @@ async function main() {
 }
 
 main()
-  .then(() => prisma.$disconnect())
   .then(() => pool.end())
   .catch(async (e) => {
     if (isConnectionRefused(e)) {
       printConnectionHelp();
     }
     console.error(e);
-    await prisma.$disconnect();
-    await pool.end();
+    await pool.end().catch(() => {});
     process.exit(1);
   });

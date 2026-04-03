@@ -1,23 +1,22 @@
 import { NextResponse } from "next/server";
+import { and, desc, eq, lt, or } from "drizzle-orm";
 import { auth } from "@/auth";
+import { posts, users } from "@/drizzle/schema";
 import { serializePost, jsonValueFromUrls } from "@/lib/api-serialize";
+import { db } from "@/lib/db";
 import { devLog } from "@/lib/dev-log";
 import { sanitizeImageUrls } from "@/lib/post-image-urls";
 import {
   postCreateBodySchema,
   postListQuerySchema,
 } from "@/lib/validations/post";
-import { prisma } from "@/lib/prisma";
 
-const authorSelect = {
+const authorColumns = {
   id: true,
   name: true,
   email: true,
   profileImageUrl: true,
 } as const;
-
-/** 목록 정렬과 커서가 일치해야 함: 최신순, id 내림차순으로 안정화 */
-const listOrderBy = [{ createdAt: "desc" as const }, { id: "desc" as const }];
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -38,37 +37,50 @@ export async function GET(request: Request) {
 
   devLog("api:posts", "GET /api/posts: page", { cursor: cursor ?? null, limit });
 
+  let cursorWhere: ReturnType<typeof or> | undefined;
   if (cursor) {
-    const cursorRow = await prisma.post.findUnique({
-      where: { id: cursor },
-      select: { id: true },
+    const cursorRow = await db.query.posts.findFirst({
+      where: eq(posts.id, cursor),
+      columns: { id: true, createdAt: true },
     });
     if (!cursorRow) {
       devLog("api:posts", "GET /api/posts: 400 bad cursor", { cursor });
       return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
     }
+    cursorWhere = or(
+      lt(posts.createdAt, cursorRow.createdAt),
+      and(
+        eq(posts.createdAt, cursorRow.createdAt),
+        lt(posts.id, cursorRow.id),
+      ),
+    );
   }
 
-  const posts = await prisma.post.findMany({
-    take,
-    ...(cursor
-      ? { skip: 1, cursor: { id: cursor } }
-      : {}),
-    orderBy: listOrderBy,
-    include: { author: { select: authorSelect } },
+  const pageRows = await db.query.posts.findMany({
+    limit: take,
+    where: cursorWhere,
+    orderBy: [desc(posts.createdAt), desc(posts.id)],
+    with: {
+      author: { columns: authorColumns },
+    },
   });
 
-  const hasNext = posts.length > limit;
-  const pageRows = hasNext ? posts.slice(0, limit) : posts;
-  const nextCursor = hasNext ? pageRows[pageRows.length - 1]?.id ?? null : null;
+  const hasNext = pageRows.length > limit;
+  const items = hasNext ? pageRows.slice(0, limit) : pageRows;
+  const nextCursor = hasNext ? (items[items.length - 1]?.id ?? null) : null;
 
   devLog("api:posts", "GET /api/posts: ok", {
-    returned: pageRows.length,
+    returned: items.length,
     hasNext,
   });
 
   return NextResponse.json({
-    items: pageRows.map((p) => serializePost(p)),
+    items: items.map((p) =>
+      serializePost({
+        ...p,
+        author: p.author ?? null,
+      }),
+    ),
     nextCursor,
   });
 }
@@ -100,14 +112,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: urlsResult.message }, { status: 400 });
     }
 
-    const post = await prisma.post.create({
-      data: {
+    const [post] = await db
+      .insert(posts)
+      .values({
         title: parsed.data.title,
         content: parsed.data.content,
         authorId: session.user.id,
         imageUrls: jsonValueFromUrls(urlsResult.urls),
-      },
-      include: { author: { select: authorSelect } },
+      })
+      .returning();
+
+    if (!post) {
+      return NextResponse.json({ error: "Server error" }, { status: 500 });
+    }
+
+    const author = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+      columns: authorColumns,
     });
 
     devLog("api:posts", "POST /api/posts: 201 created", {
@@ -115,7 +136,13 @@ export async function POST(request: Request) {
       authorId: session.user.id,
       imageCount: urlsResult.urls.length,
     });
-    return NextResponse.json(serializePost(post), { status: 201 });
+    return NextResponse.json(
+      serializePost({
+        ...post,
+        author: author ?? null,
+      }),
+      { status: 201 },
+    );
   } catch {
     devLog("api:posts", "POST /api/posts: 500 error");
     return NextResponse.json({ error: "Server error" }, { status: 500 });

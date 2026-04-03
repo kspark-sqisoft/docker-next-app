@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { users } from "@/drizzle/schema";
+import { db } from "@/lib/db";
 import { devLog } from "@/lib/dev-log";
-import { prisma } from "@/lib/prisma";
 import { saveProfileAvatar } from "@/lib/save-profile-avatar";
 
 export async function POST(request: Request) {
@@ -35,9 +37,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: {
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, session.user.id),
+    columns: {
       id: true,
       email: true,
       name: true,

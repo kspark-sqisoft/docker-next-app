@@ -1,10 +1,12 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import authConfig from "@/auth.config";
+import { users } from "@/drizzle/schema";
+import { db } from "@/lib/db";
 import { devLog } from "@/lib/dev-log";
-import { prisma } from "@/lib/prisma";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -28,9 +30,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         devLog("auth", "authorize: attempt", { email: parsed.data.email });
 
-        const user = await prisma.user.findUnique({
-          where: { email: parsed.data.email },
-          select: {
+        const user = await db.query.users.findFirst({
+          where: eq(users.email, parsed.data.email),
+          columns: {
             id: true,
             email: true,
             name: true,
@@ -94,9 +96,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       if (!session.user?.id) return session;
 
-      const row = await prisma.user.findUnique({
-        where: { id: session.user.id },
-        select: { name: true, email: true, profileImageUrl: true },
+      const row = await db.query.users.findFirst({
+        where: eq(users.id, session.user.id),
+        columns: { name: true, email: true, profileImageUrl: true },
       });
       if (row) {
         session.user.name = row.name;

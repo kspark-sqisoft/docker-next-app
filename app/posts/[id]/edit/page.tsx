@@ -1,19 +1,21 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { EditPostForm } from "./edit-post-form";
+import { posts } from "@/drizzle/schema";
 import { imageUrlsFromDb } from "@/lib/post-json";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 import { buttonVariants } from "@/lib/button-variants";
 import { cn } from "@/lib/utils";
-import { EditPostForm } from "./edit-post-form";
 
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  const post = await prisma.post.findUnique({
-    where: { id },
-    select: { title: true },
+  const post = await db.query.posts.findFirst({
+    where: eq(posts.id, id),
+    columns: { title: true },
   });
   return { title: post ? `글 수정: ${post.title}` : "글 수정" };
 }
@@ -25,7 +27,7 @@ export default async function EditPostPage({ params }: PageProps) {
     redirect(`/login?callbackUrl=/posts/${id}/edit`);
   }
 
-  const post = await prisma.post.findUnique({ where: { id } });
+  const post = await db.query.posts.findFirst({ where: eq(posts.id, id) });
   if (!post) notFound();
   if (post.authorId !== session.user.id) {
     redirect(`/posts/${id}`);

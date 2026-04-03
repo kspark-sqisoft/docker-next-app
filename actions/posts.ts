@@ -1,15 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { posts } from "@/drizzle/schema";
 import { jsonValueFromUrls } from "@/lib/api-serialize";
+import { db } from "@/lib/db";
 import { devLog } from "@/lib/dev-log";
 import { imageUrlsFromDb } from "@/lib/post-json";
 import {
   sanitizeImageUrls,
   unlinkPostImageFile,
 } from "@/lib/post-image-urls";
-import { prisma } from "@/lib/prisma";
 import {
   parsePostImageUrlsFromFormJson,
   postFormFieldsSchema,
@@ -66,24 +68,19 @@ export async function createPost(
     return { error: urlsResult.message };
   }
 
-  const post = await prisma.post.create({
-    data: {
+  const [post] = await db
+    .insert(posts)
+    .values({
       title: parsedFields.data.title,
       content: parsedFields.data.content,
       authorId: session.user.id,
       imageUrls: jsonValueFromUrls(urlsResult.urls),
-    },
-    include: {
-      author: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          profileImageUrl: true,
-        },
-      },
-    },
-  });
+    })
+    .returning({ id: posts.id });
+
+  if (!post) {
+    return { error: "저장에 실패했습니다." };
+  }
 
   revalidatePath("/posts");
   revalidatePath(`/posts/${post.id}`);
@@ -142,7 +139,7 @@ export async function updatePost(
     return { error: urlsResult.message };
   }
 
-  const existing = await prisma.post.findUnique({ where: { id: postId } });
+  const existing = await db.query.posts.findFirst({ where: eq(posts.id, postId) });
   if (!existing) {
     devLog("action:updatePost", "abort: not found", { postId });
     return { error: "글을 찾을 수 없습니다." };
@@ -156,14 +153,14 @@ export async function updatePost(
   const removed = prevUrls.filter((u) => !urlsResult.urls.includes(u));
   await Promise.all(removed.map((u) => unlinkPostImageFile(u)));
 
-  await prisma.post.update({
-    where: { id: postId },
-    data: {
+  await db
+    .update(posts)
+    .set({
       title: parsedFields.data.title,
       content: parsedFields.data.content,
       imageUrls: jsonValueFromUrls(urlsResult.urls),
-    },
-  });
+    })
+    .where(eq(posts.id, postId));
 
   revalidatePath("/posts");
   revalidatePath(`/posts/${postId}`);
@@ -190,7 +187,7 @@ export async function deletePost(
     return { error: "로그인이 필요합니다." };
   }
 
-  const existing = await prisma.post.findUnique({ where: { id: postId } });
+  const existing = await db.query.posts.findFirst({ where: eq(posts.id, postId) });
   if (!existing) {
     devLog("action:deletePost", "abort: not found", { postId });
     return { error: "글을 찾을 수 없습니다." };
@@ -202,7 +199,7 @@ export async function deletePost(
 
   const urls = imageUrlsFromDb(existing.imageUrls);
   await Promise.all(urls.map((u) => unlinkPostImageFile(u)));
-  await prisma.post.delete({ where: { id: postId } });
+  await db.delete(posts).where(eq(posts.id, postId));
 
   revalidatePath("/posts");
   revalidatePath(`/posts/${postId}`);

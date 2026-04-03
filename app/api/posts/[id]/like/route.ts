@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { postLikes, posts } from "@/drizzle/schema";
+import { db } from "@/lib/db";
 import { devLog } from "@/lib/dev-log";
-import { prisma } from "@/lib/prisma";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -17,26 +19,26 @@ export async function POST(_request: Request, context: RouteContext) {
   const userId = session.user.id;
   devLog("api:posts/[id]/like", "POST: start", { postId, userId });
 
-  const post = await prisma.post.findUnique({ where: { id: postId } });
+  const post = await db.query.posts.findFirst({ where: eq(posts.id, postId) });
   if (!post) {
     devLog("api:posts/[id]/like", "POST: 404", { postId });
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const existing = await prisma.postLike.findUnique({
-    where: { userId_postId: { userId, postId } },
+  const existing = await db.query.postLikes.findFirst({
+    where: and(eq(postLikes.postId, postId), eq(postLikes.userId, userId)),
   });
 
   let likedByMe: boolean;
   if (existing) {
-    await prisma.postLike.delete({ where: { id: existing.id } });
+    await db.delete(postLikes).where(eq(postLikes.id, existing.id));
     likedByMe = false;
   } else {
-    await prisma.postLike.create({ data: { userId, postId } });
+    await db.insert(postLikes).values({ userId, postId });
     likedByMe = true;
   }
 
-  const likeCount = await prisma.postLike.count({ where: { postId } });
+  const likeCount = await db.$count(postLikes, eq(postLikes.postId, postId));
   devLog("api:posts/[id]/like", "POST: ok", { postId, likeCount, likedByMe });
 
   return NextResponse.json({ likeCount, likedByMe });

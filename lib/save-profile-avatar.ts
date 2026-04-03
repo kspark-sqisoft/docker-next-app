@@ -1,7 +1,9 @@
 import { randomUUID } from "crypto";
 import { writeFile } from "fs/promises";
 import { extname, join } from "path";
-import { prisma } from "@/lib/prisma";
+import { eq } from "drizzle-orm";
+import { users } from "@/drizzle/schema";
+import { db } from "@/lib/db";
 import { unlinkProfileImageFile } from "@/lib/post-image-urls";
 import {
   ALLOWED_POST_IMAGE_MIMES,
@@ -26,9 +28,9 @@ export async function saveProfileAvatar(
     return { ok: false, error: "파일 크기는 2MB 이하여야 합니다." };
   }
 
-  const existing = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { profileImageUrl: true },
+  const existing = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { profileImageUrl: true },
   });
   if (existing?.profileImageUrl?.startsWith("/uploads/profiles/")) {
     await unlinkProfileImageFile(existing.profileImageUrl);
@@ -50,10 +52,10 @@ export async function saveProfileAvatar(
   await writeFile(join(dir, filename), buf);
 
   const url = `/uploads/profiles/${filename}`;
-  await prisma.user.update({
-    where: { id: userId },
-    data: { profileImageUrl: url },
-  });
+  await db
+    .update(users)
+    .set({ profileImageUrl: url })
+    .where(eq(users.id, userId));
 
   return { ok: true, profileImageUrl: url };
 }

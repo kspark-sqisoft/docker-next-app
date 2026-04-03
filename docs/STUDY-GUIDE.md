@@ -1,5 +1,7 @@
 # Docker Next Blog — 학습 가이드
 
+> **브랜치 `drizzle`**: 앱 코드는 **Drizzle ORM**(`drizzle/schema.ts`, `lib/db.ts`, `drizzle-kit migrate`)을 씁니다. 아래 본문은 `main`(Prisma)과 docker-app을 비교하는 흐름이라 Prisma 설명이 많이 남아 있습니다. Drizzle만 보려면 `README.md`와 `drizzle/` 디렉터리를 우선하세요.
+
 이 문서는 `docker-app`(Nest 백엔드 + Vite 프론트 + TypeORM)과 **같은 문제를 Next.js 한 프로젝트**로 풀면서, Docker·Prisma·인증·프론트 데이터 계층을 **순서대로** 이해할 수 있게 정리했습니다.
 
 ---

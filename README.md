@@ -5,7 +5,7 @@
 ## 스택
 
 - Next.js 16 (App Router), React 19  
-- PostgreSQL 16, Prisma 7 (`@prisma/adapter-pg`, `pg` 풀)  
+- PostgreSQL 16, **Drizzle ORM** + `pg` (`lib/db.ts`, `drizzle/schema.ts`)  
 - NextAuth (Auth.js) Credentials + JWT 세션  
 - Tailwind CSS v4, shadcn/ui (Base UI)  
 - TanStack Query (글 목록·작성·수정 후 무효화)  
@@ -17,11 +17,13 @@
 ```bash
 cp .env.example .env
 # DATABASE_URL 을 실제 Postgres에 맞게 수정
-npx prisma migrate dev
+npm run db:migrate
 npm run dev
 ```
 
 브라우저: [http://localhost:3000](http://localhost:3000) → 자동으로 `/posts`(게시판)로 이동합니다.
+
+**이미 Prisma 마이그레이션으로 만든 DB**가 있으면 `drizzle/migrations/0000_initial.sql`의 `CREATE TABLE`이 충돌할 수 있습니다. 그럴 때는 새 DB를 쓰거나, 스키마만 맞추려면 `npm run db:push`(로컬 실험용)를 검토하세요.
 
 ## Docker
 
@@ -55,7 +57,7 @@ DATABASE_URL="postgresql://..." npm run db:seed
 ## 문서
 
 - [docs/STUDY-GUIDE.md](./docs/STUDY-GUIDE.md) — docker-app과의 대응, 디렉터리 구조, 단계별 학습 절차  
-  - **Prisma**: 세팅 절차·파일 역할·공부 순서는 가이드 **§2.2** 참고  
+  - **ORM**: 이 브랜치는 Drizzle 기준(`drizzle/`, `lib/db.ts`). 가이드 본문의 Prisma 절은 `main` 브랜치와의 대조용으로 남겨 두었습니다.  
   - **추가 학습 로드맵**: 액션·페이지네이션·테스트·CI 등 제안은 가이드 **§10**
 
 ## 주요 스크립트
@@ -63,7 +65,8 @@ DATABASE_URL="postgresql://..." npm run db:seed
 | 명령 | 설명 |
 |------|------|
 | `npm run dev` | Next 개발 서버 |
-| `npm run build` | `prisma generate` 후 프로덕션 빌드 |
-| `npm run db:migrate` | 로컬에서 `prisma migrate dev` |
-| `npm run db:deploy` | 배포/컨테이너에서 `prisma migrate deploy` |
+| `npm run build` | 프로덕션 빌드 |
+| `npm run db:migrate` / `db:deploy` | `drizzle-kit migrate` (마이그레이션 적용) |
+| `npm run db:generate` | 스키마 변경 후 SQL 생성 (`drizzle-kit generate`) |
+| `npm run db:push` | 스키마를 DB에 직접 반영(로컬 실험용) |
 | `npm run db:seed` | 시드 실행 |

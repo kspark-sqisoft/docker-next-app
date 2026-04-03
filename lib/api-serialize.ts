@@ -1,4 +1,3 @@
-import { Prisma } from "@/app/generated/prisma/client";
 import { imageUrlsFromDb } from "@/lib/post-json";
 
 type AuthorSelect = {
@@ -32,6 +31,7 @@ export function serializePost(post: PostWithAuthor) {
   };
 }
 
-export function jsonValueFromUrls(urls: string[]): Prisma.InputJsonValue {
-  return urls as unknown as Prisma.InputJsonValue;
+/** jsonb 컬럼용 — Drizzle 이 JSON 으로 직렬화합니다. */
+export function jsonValueFromUrls(urls: string[]): unknown {
+  return urls as unknown;
 }

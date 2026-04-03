@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { postLikes, posts } from "@/drizzle/schema";
 import { serializePost, jsonValueFromUrls } from "@/lib/api-serialize";
+import { db } from "@/lib/db";
 import {
   sanitizeImageUrls,
   unlinkPostImageFile,
@@ -8,9 +11,8 @@ import {
 import { devLog } from "@/lib/dev-log";
 import { imageUrlsFromDb } from "@/lib/post-json";
 import { postUpdateBodySchema } from "@/lib/validations/post";
-import { prisma } from "@/lib/prisma";
 
-const authorSelect = {
+const authorColumns = {
   id: true,
   name: true,
   email: true,
@@ -25,19 +27,19 @@ export async function GET(_request: Request, context: RouteContext) {
   const session = await auth();
 
   const [post, userLike] = await Promise.all([
-    prisma.post.findUnique({
-      where: { id },
-      include: {
-        author: { select: authorSelect },
-        _count: { select: { likes: true } },
+    db.query.posts.findFirst({
+      where: eq(posts.id, id),
+      with: {
+        author: { columns: authorColumns },
       },
     }),
     session?.user?.id
-      ? prisma.postLike.findUnique({
-          where: {
-            userId_postId: { userId: session.user.id, postId: id },
-          },
-          select: { id: true },
+      ? db.query.postLikes.findFirst({
+          where: and(
+            eq(postLikes.postId, id),
+            eq(postLikes.userId, session.user.id),
+          ),
+          columns: { id: true },
         })
       : Promise.resolve(null),
   ]);
@@ -46,10 +48,16 @@ export async function GET(_request: Request, context: RouteContext) {
     devLog("api:posts/[id]", "GET: 404", { postId: id });
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  const likeCount = await db.$count(postLikes, eq(postLikes.postId, id));
+
   devLog("api:posts/[id]", "GET: ok", { postId: id });
   return NextResponse.json({
-    ...serializePost(post),
-    likeCount: post._count.likes,
+    ...serializePost({
+      ...post,
+      author: post.author ?? null,
+    }),
+    likeCount,
     likedByMe: Boolean(userLike),
   });
 }
@@ -63,7 +71,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const { id } = await context.params;
   devLog("api:posts/[id]", "PATCH: start", { postId: id, userId: session.user.id });
-  const existing = await prisma.post.findUnique({ where: { id } });
+  const existing = await db.query.posts.findFirst({ where: eq(posts.id, id) });
   if (!existing) {
     devLog("api:posts/[id]", "PATCH: 404", { postId: id });
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -107,14 +115,20 @@ export async function PATCH(request: Request, context: RouteContext) {
       data.imageUrls = jsonValueFromUrls(urlsResult.urls);
     }
 
-    const post = await prisma.post.update({
-      where: { id },
-      data,
-      include: { author: { select: authorSelect } },
+    await db.update(posts).set(data).where(eq(posts.id, id));
+
+    const post = await db.query.posts.findFirst({
+      where: eq(posts.id, id),
+      with: { author: { columns: authorColumns } },
     });
+    if (!post) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
 
     devLog("api:posts/[id]", "PATCH: ok", { postId: id });
-    return NextResponse.json(serializePost(post));
+    return NextResponse.json(
+      serializePost({ ...post, author: post.author ?? null }),
+    );
   } catch {
     devLog("api:posts/[id]", "PATCH: 500", { postId: id });
     return NextResponse.json({ error: "Server error" }, { status: 500 });
@@ -130,7 +144,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
   const { id } = await context.params;
   devLog("api:posts/[id]", "DELETE: start", { postId: id, userId: session.user.id });
-  const existing = await prisma.post.findUnique({ where: { id } });
+  const existing = await db.query.posts.findFirst({ where: eq(posts.id, id) });
   if (!existing) {
     devLog("api:posts/[id]", "DELETE: 404", { postId: id });
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -142,7 +156,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
   const urls = imageUrlsFromDb(existing.imageUrls);
   await Promise.all(urls.map((u) => unlinkPostImageFile(u)));
-  await prisma.post.delete({ where: { id } });
+  await db.delete(posts).where(eq(posts.id, id));
   devLog("api:posts/[id]", "DELETE: ok", { postId: id, removedImages: urls.length });
   return NextResponse.json({ ok: true });
 }

@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { PostLikeBar } from "@/components/posts/post-like-bar";
+import { postLikes, posts } from "@/drizzle/schema";
 import { imageUrlsFromDb } from "@/lib/post-json";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
 import { buttonVariants } from "@/lib/button-variants";
 import { cn } from "@/lib/utils";
 import {
@@ -12,15 +15,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { PostLikeBar } from "@/components/posts/post-like-bar";
 
 type PageProps = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { id } = await params;
-  const post = await prisma.post.findUnique({
-    where: { id },
-    select: { title: true },
+  const post = await db.query.posts.findFirst({
+    where: eq(posts.id, id),
+    columns: { title: true },
   });
   return { title: post?.title ?? "글 보기" };
 }
@@ -30,38 +32,40 @@ export default async function PostDetailPage({ params }: PageProps) {
   const session = await auth();
 
   const [post, userLike] = await Promise.all([
-    prisma.post.findUnique({
-      where: { id },
-      include: {
+    db.query.posts.findFirst({
+      where: eq(posts.id, id),
+      with: {
         author: {
-          select: {
+          columns: {
             id: true,
             name: true,
             email: true,
             profileImageUrl: true,
           },
         },
-        _count: { select: { likes: true } },
       },
     }),
     session?.user?.id
-      ? prisma.postLike.findUnique({
-          where: {
-            userId_postId: { userId: session.user.id, postId: id },
-          },
-          select: { id: true },
+      ? db.query.postLikes.findFirst({
+          where: and(
+            eq(postLikes.postId, id),
+            eq(postLikes.userId, session.user.id),
+          ),
+          columns: { id: true },
         })
       : Promise.resolve(null),
   ]);
 
   if (!post) notFound();
 
+  const likeCount = await db.$count(postLikes, eq(postLikes.postId, id));
+
   const isOwner = session?.user?.id === post.authorId;
+  const imageUrls = imageUrlsFromDb(post.imageUrls);
   const likeInitial = {
-    likeCount: post._count.likes,
+    likeCount,
     likedByMe: Boolean(userLike),
   };
-  const imageUrls = imageUrlsFromDb(post.imageUrls);
 
   return (
     <div className="space-y-6">

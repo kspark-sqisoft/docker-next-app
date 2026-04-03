@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { hash } from "bcryptjs";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { users } from "@/drizzle/schema";
+import { db } from "@/lib/db";
 import { devLog } from "@/lib/dev-log";
-import { prisma } from "@/lib/prisma";
 
 const bodySchema = z.object({
   email: z.string().email().max(320),
@@ -24,7 +26,9 @@ export async function POST(request: Request) {
     }
 
     const { email, name, password } = parsed.data;
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const existing = await db.query.users.findFirst({
+      where: eq(users.email, email),
+    });
     if (existing) {
       devLog("api:register", "POST: 409 email exists", { email });
       return NextResponse.json(
@@ -34,9 +38,7 @@ export async function POST(request: Request) {
     }
 
     const passwordHash = await hash(password, 12);
-    await prisma.user.create({
-      data: { email, name, passwordHash },
-    });
+    await db.insert(users).values({ email, name, passwordHash });
 
     devLog("api:register", "POST: 201 created", { email });
     return NextResponse.json({ ok: true }, { status: 201 });

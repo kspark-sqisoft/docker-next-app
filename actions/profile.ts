@@ -1,10 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/auth";
+import { users } from "@/drizzle/schema";
+import { db } from "@/lib/db";
 import { devLog } from "@/lib/dev-log";
-import { prisma } from "@/lib/prisma";
 import { saveProfileAvatar } from "@/lib/save-profile-avatar";
 
 /** React 19 useActionState 와 함께 쓰는 프로필 이름 변경 */
@@ -45,10 +47,10 @@ export async function updateProfileName(
     return { error: "이름은 1~100자여야 합니다." };
   }
 
-  await prisma.user.update({
-    where: { id: session.user.id },
-    data: { name: parsed.data.name },
-  });
+  await db
+    .update(users)
+    .set({ name: parsed.data.name })
+    .where(eq(users.id, session.user.id));
 
   revalidatePath("/profile");
   revalidatePath("/posts");

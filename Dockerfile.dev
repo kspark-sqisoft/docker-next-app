@@ -6,8 +6,8 @@ COPY docker/dev-entrypoint.sh /usr/local/bin/docker-dev-entrypoint.sh
 RUN tr -d '\r' < /usr/local/bin/docker-dev-entrypoint.sh > /tmp/docker-dev-entrypoint.sh \
   && mv /tmp/docker-dev-entrypoint.sh /usr/local/bin/docker-dev-entrypoint.sh \
   && chmod +x /usr/local/bin/docker-dev-entrypoint.sh
-COPY prisma ./prisma
-COPY prisma.config.ts ./prisma.config.ts
+COPY drizzle ./drizzle
+COPY drizzle.config.ts ./drizzle.config.ts
 COPY package.json package-lock.json ./
 RUN npm ci
 EXPOSE 3000
