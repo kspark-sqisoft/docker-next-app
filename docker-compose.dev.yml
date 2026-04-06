@@ -36,7 +36,11 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:-change_me_to_a_long_random_secret_at_least_32_chars}
       AUTH_URL: ${AUTH_URL:-http://localhost:3000}
       UPLOADS_DIR: /app/uploads
+      # dev-entrypoint 가 `next dev --webpack` 사용. next.config.ts 의 watchOptions.pollIntervalMs 와 함께 볼륨 마운트에서 감시 안정화
       WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      # Docker에서 Webpack 파일시스템 캐시가 오래된 청크를 붙잡는 경우 대비
+      NEXT_WEBPACK_NO_CACHE: "true"
     volumes:
       - .:/app
       - web_node_modules:/app/node_modules
