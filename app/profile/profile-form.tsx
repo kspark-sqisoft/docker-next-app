@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useActionState, useEffect, useRef, useState } from "react";
@@ -40,24 +41,34 @@ export function ProfileForm() {
     {},
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (user) setName(user.name ?? "");
-  }, [user, user?.name]);
-
-  useEffect(() => {
-    if (nameState?.success && nameState.name) {
-      void update({ name: nameState.name });
-      router.refresh();
+  /** next-auth `update`는 session/loading마다 새 참조라 deps에 넣으면 성공 직후 무한 재실행됨 */
+  const lastSyncedName = useRef<string | undefined>(undefined);
+  const lastSyncedAvatarUrl = useRef<string | undefined>(undefined);
+  /** 세션 이름이 바뀔 때만 입력값 동기화 (effect의 setState 금지 규칙 회피, 타이핑 중에는 session 이름 불변) */
+  const prevSessionNameForField = useRef<string | undefined>(undefined);
+  if (user) {
+    const nextName = user.name ?? "";
+    if (prevSessionNameForField.current !== nextName) {
+      prevSessionNameForField.current = nextName;
+      setName(nextName);
     }
+  }
+
+  useEffect(() => {
+    if (!nameState?.success || !nameState.name) return;
+    if (lastSyncedName.current === nameState.name) return;
+    lastSyncedName.current = nameState.name;
+    void update({ name: nameState.name });
+    router.refresh();
   }, [nameState, update, router]);
 
   useEffect(() => {
-    if (avatarState?.success && avatarState.profileImageUrl) {
-      void update({ profileImageUrl: avatarState.profileImageUrl });
-      router.refresh();
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+    if (!avatarState?.success || !avatarState.profileImageUrl) return;
+    if (lastSyncedAvatarUrl.current === avatarState.profileImageUrl) return;
+    lastSyncedAvatarUrl.current = avatarState.profileImageUrl;
+    void update({ profileImageUrl: avatarState.profileImageUrl });
+    router.refresh();
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }, [avatarState, update, router]);
 
   function onAvatarPicked(e: ChangeEvent<HTMLInputElement>) {
@@ -113,9 +124,11 @@ export function ProfileForm() {
             <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
               <div className="shrink-0">
                 {user.profileImageUrl ? (
-                  <img
+                  <Image
                     src={user.profileImageUrl}
                     alt=""
+                    width={112}
+                    height={112}
                     className="border-border size-28 rounded-full border object-cover"
                   />
                 ) : (
